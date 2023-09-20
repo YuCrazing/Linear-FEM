@@ -79,8 +79,8 @@ def init():
         vertices[i] += offset
 
     for i in range(vn):
-        x[i] = vertices[i]
-        x[i].y = 0.5
+        # x[i] = vertices[i]
+        # x[i].y = 0.5
         x[i] = ti.Vector([ti.random(), ti.random(), ti.random()])
         v[i] = ti.Vector([0.0, 0.0, 0.0])
 
