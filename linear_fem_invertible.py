@@ -13,6 +13,7 @@ rho = 1.0
 friction_coeff = 0.01
 gravity = ti.Vector([0, -9.8, 0])
 damping = 15.0
+record_video = False
 
 
 NEO_HOOKEAN = 0
@@ -221,7 +222,10 @@ def substep():
                 v_rel -= ti.min(friction_coeff, 1.0) * v_t
             v[i] = v_rel + v_co
 
+result_dir = "./result"
+video_manager = ti.tools.VideoManager(output_dir=result_dir, framerate=60, automatic_build=False)
 
+frame = 0
 def main():
     window = ti.ui.Window("Invertible Constitutive Model", (800, 800), vsync=True)
     canvas = window.get_canvas()
@@ -251,10 +255,17 @@ def main():
         # scene.mesh(x, indices=all_tri_indices, two_sided=True, color=(0.7, 0.0, 0.0), show_wireframe=True)
         
         canvas.scene(scene)
+                
+        if record_video:
+            video_manager.write_frame(window.get_image_buffer_as_numpy())
         window.show()
 
-    # TODO: include self-collision handling
-
+        global frame
+        frame += 1
+        if frame >= 360:
+            break
+    if record_video:
+        video_manager.make_video(gif=True, mp4=True)
 
 if __name__ == "__main__":
     main()
