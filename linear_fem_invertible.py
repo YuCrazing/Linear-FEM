@@ -12,7 +12,7 @@ nu = 0.2
 rho = 1.0
 friction_coeff = 0.01
 gravity = ti.Vector([0, -9.8, 0])
-damping = 20.0
+damping = 15.0
 
 
 NEO_HOOKEAN = 0
@@ -26,11 +26,9 @@ INVERTIBLE_COROTATED = 3
 # From paper "Stable Neo-Hookean Flesh Simulation"
 INVERTIBLE_NEOHOOKEAN = 4
 
-# CONSTITUTIVE_MODEL = INVERTIBLE_COROTATED
 CONSTITUTIVE_MODEL = INVERTIBLE_NEOHOOKEAN
 
 # nodes, faces, elements = tetgen_parser.parse_tetgen_output('./data/minimal.1')
-# nodes, faces, elements = tetgen_parser.parse_tetgen_output('./data/sphere_sim.1')
 # nodes, faces, elements = tetgen_parser.parse_tetgen_output('./data/cube.1')
 nodes, faces, elements = tetgen_parser.parse_tetgen_output('./data/cube.2')
 # nodes, faces, elements = tetgen_parser.parse_tetgen_output('./data/cube.3')
@@ -81,7 +79,7 @@ def init():
 
     for i in range(vn):
         x[i] = vertices[i]
-        # x[i].y = 0.5
+        x[i].y = 0.5
         x[i] = ti.Vector([ti.random(), ti.random(), ti.random()])
         v[i] = ti.Vector([0.0, 0.0, 0.0])
 
@@ -103,8 +101,8 @@ def substep():
     for i in range(vn):
         f[i] = ti.Vector([0.0, 0.0, 0.0])
 
-    for ii in ti.grouped(tet_indices):
-        a, b, c, d = tet_indices[ii]
+    for ei in ti.grouped(tet_indices):
+        a, b, c, d = tet_indices[ei]
         pa, pb, pc, pd = x[a], x[b], x[c], x[d]
         pa0, pb0, pc0, pd0 = vertices[a], vertices[b], vertices[c], vertices[d]
         D = ti.Matrix.cols([pa - pd, pb - pd, pc - pd])
@@ -132,23 +130,32 @@ def substep():
         elif CONSTITUTIVE_MODEL == INVERTIBLE_COROTATED:
             I = ti.Matrix.identity(ti.f32, 3)
             U, sig, V = ti.svd(F)
-            # P_hat = 2 * mu * (sig - I) + la * sig.trace() * I
+            # Psi = mu * ((sig[0, 0]-1)**2+(sig[1, 1]-1)**2+(sig[2, 2]-1)**2) + 0.5*la * (J-1)**2
             J_sig_inv = ti.Matrix([[sig[1, 1]*sig[2, 2], 0.0, 0.0], [0.0, sig[2, 2]*sig[0, 0], 0.0], [0, 0, sig[0, 0]*sig[1, 1]]])
+            # P_hat = 2 * mu * (sig - I) + la * sig.trace() * I
             P_hat = 2 * mu * (sig - I) + la * (J-1) * J_sig_inv
             P = U @ P_hat @ V.transpose()
         elif CONSTITUTIVE_MODEL == INVERTIBLE_NEOHOOKEAN:
-            f0, f1, f2 = col(F, 0), col(F, 1), col(F, 2)
-            # J = f0.dot(f1.cross(f2))
-            alpha = 1# - mu / la
-            I3 = J
             Ic = (F.transpose() @ F).trace()
+            I2 = Ic
+            I3 = J
             U, sig, V = ti.svd(F)
-            R = U @ V.transpose()
-            J_sig_inv = ti.Matrix([[sig[1, 1]*sig[2, 2], 0.0, 0.0], [0.0, sig[2, 2]*sig[0, 0], 0.0], [0, 0, sig[0, 0]*sig[1, 1]]])
-            P = mu * (F) - la * (I3-alpha) * U @ J_sig_inv @ V.transpose()
-            # dJdF = ti.Matrix.cols([f1.cross(f2), f2.cross(f0), f0.cross(f1)])
-            # P = mu * (1 - 1/(Ic+1)) * F + la * (I3-alpha) * dJdF
 
+            # Paper "Stable Neo-Hookean Flesh Simulation"
+            alpha = 1 + mu/la - mu/(4*la)
+            f0, f1, f2 = col(F, 0), col(F, 1), col(F, 2)
+            # Psi = 0.5*mu*(Ic-3)+0.5*la*(J-alpha)**2 - 0.5*ti.log(Ic+1)
+            dJdF = ti.Matrix.cols([f1.cross(f2), f2.cross(f0), f0.cross(f1)])
+            J_sig_inv = ti.Matrix([[sig[1, 1]*sig[2, 2], 0.0, 0.0], [0.0, sig[2, 2]*sig[0, 0], 0.0], [0, 0, sig[0, 0]*sig[1, 1]]])
+            P = mu * (1 - 1/(Ic+1)) * F + la * (I3-alpha) * dJdF
+            # P = mu * F + la * (I3-alpha) * U @ J_sig_inv @ V.transpose() - mu / (Ic+1) * F
+
+            # # Course "Dynamic Deformables: Implementation and Production Practicalities"
+            # alpha = 1 + mu/la
+            # # Psi = 0.5*mu*(I2-3)+0.5*la*(I3-1)**2 - mu*(I3-1)
+            # J_sig_inv = ti.Matrix([[sig[1, 1]*sig[2, 2], 0.0, 0.0], [0.0, sig[2, 2]*sig[0, 0], 0.0], [0, 0, sig[0, 0]*sig[1, 1]]])
+            # P = mu * F + la * (I3-alpha) * U @ J_sig_inv @ V.transpose() - mu * U @ J_sig_inv @ V.transpose()
+            
 
         # acc = -(\partial U / \partial x) / m
         #             = -V0 * P : (\partial F / \partial x) / (V * rho)
@@ -166,7 +173,7 @@ def substep():
         f[a].z += tensor_contraction(
             P,
             ti.Matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]) @ D0_inv) / J
-        
+
         f[b].x += tensor_contraction(
             P,
             ti.Matrix([[0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]) @ D0_inv) / J
@@ -186,7 +193,7 @@ def substep():
         f[c].z += tensor_contraction(
             P,
             ti.Matrix([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) @ D0_inv) / J
-        
+
         f[d].x += tensor_contraction(
             P,
             ti.Matrix([[-1.0, -1.0, -1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]) @ D0_inv) / J
